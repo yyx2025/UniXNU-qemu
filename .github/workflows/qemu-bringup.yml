@@ -110,34 +110,15 @@ jobs:
 
       - name: Boot the native-user fixture in QEMU
         run: |
+          set -o pipefail
           python3 out/qemu/tree/scripts/run-qemu.py \
-            --native-user --accel tcg --seconds "${{ inputs.seconds || 420 }}"
+            --native-user --accel tcg --seconds "${{ inputs.seconds || 420 }}" 2>&1 | tee run-qemu.log
 
-      - name: Check the run
+      - name: Check the run reached EL0
         run: |
-          python3 - "$GITHUB_WORKSPACE" <<'PY'
-          import json, pathlib, re, sys
-          root = pathlib.Path(sys.argv[1])
-          runs = sorted((root / 'out/qemu/run').glob('*/'), key=lambda p: p.name)
-          if not runs:
-              sys.exit('no run directory was produced')
-          run = runs[-1]
-          print(f'run: {run}')
-          result = run / 'result.json'
-          if result.is_file():
-              data = json.loads(result.read_text())
-              print(json.dumps(data, indent=2))
-              if data.get('native_user_pc'):
-                  print('PASS: native user process reached EL0')
-                  sys.exit(0)
-          log = (run / 'serial.log').read_text(errors='replace')
-          print('--- serial tail ---')
-          print('\n'.join(log.splitlines()[-60:]))
-          if re.search(r'native user:\s*PC\s*[0-9a-fA-F]+', log):
-              print('PASS: native user process reached EL0')
-              sys.exit(0)
-          sys.exit('FAIL: no native user checkpoint in the serial log')
-          PY
+          python3 out/qemu/tree/scripts/check-qemu-run.py \
+            --work out/qemu --stdout run-qemu.log \
+            --expect-native-user --expect-screen --reject-panic
 
       - name: Upload the run
         if: always()
