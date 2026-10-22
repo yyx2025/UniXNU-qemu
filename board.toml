@@ -1,0 +1,146 @@
+# Board description of the QEMU AArch64 virt machine (GICv3, Cortex-A710), read by the unixnu build driver.
+#
+# QEMU stands in for a tablet: the generic EDK II AArch64 firmware that comes with QEMU replaces the device's Mu-Silicium
+# port, and scripts/make-qemu-adt.py describes the machine instead of a board tree. UniXNU, DarwinBoot and the kernel
+# are the same as on the boards, so they can be tried here first. scripts/run-qemu.py boots the payload.
+
+[board]
+name = "qemu"
+soc = "QEMU virt"
+description = "QEMU AArch64 virt machine"
+kit = "qemu"                       # package/ of this repository appears as kits/qemu in the build tree
+
+# The same target OS image as UniXNU-sheng and UniXNU-pipa.
+[ipsw]
+url = "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+product = "iPad7,1"
+version = "17.7.11"
+build = "21H461"
+device_class = "j120ap"
+chip_id = 0x8011
+board_id = 12
+fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemTrustCache"]
+
+[ipsw.sha256]
+"044-76040-038.dmg" = "3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d"
+"044-76034-038.dmg" = "b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f"
+
+[kernel]
+defconfig = "qemu_defconfig"
+# Archive builders of the kernel step, in order; the ones qemu_defconfig links.
+archives = [
+  "build-corecrypto-14.py",
+  "build-corecrypto-14.py --namespace",
+  "build-arm-driver.py ArmDTPlatform",
+  "build-arm-driver.py ArmCpu",
+  "build-arm-driver.py NativeAES",
+  "build-native-aes-bindings.py",
+  "build-libpthread-kernel.py",
+  "build-mockfs-fixture.py",
+  "build-link-stubs.py",
+  "build-platform-power.py",
+]
+
+# The same original kernelcache and prelink selection as the boards: the target image is the same.
+[kernel.prelink]
+tool = "kits/NativePrelink/emit_prelink.py"
+kernel = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+kernelcache_sha256 = "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
+slide = "-0x1000000"
+early_security_init = "com.apple.driver.AppleMobileFileIntegrity=0xfffffff005ab4ae0"
+roots = [
+  "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
+  "com.apple.driver.AppleARMPlatform",
+  "com.apple.driver.AppleARMWatchdogTimer",
+  "com.apple.driver.AppleAudioClockLibs",
+  "com.apple.driver.AppleEffaceableStorage",
+  "com.apple.driver.AppleIISController",
+  "com.apple.driver.AppleM2ScalerCSCDriver",
+  "com.apple.driver.AppleMobileFileIntegrity",
+  "com.apple.driver.ApplePMGR",
+  "com.apple.driver.IODARTFamily",
+  "com.apple.filesystems.apfs",
+  "com.apple.iokit.CoreAnalyticsFamily",
+  "com.apple.iokit.IOAVFamily",
+  "com.apple.iokit.IOAudio2Family",
+  "com.apple.iokit.IOCECFamily",
+  "com.apple.iokit.IOCryptoAcceleratorFamily",
+  "com.apple.iokit.IOGPUFamily",
+  "com.apple.iokit.IOHDCPFamily",
+  "com.apple.iokit.IOMobileGraphicsFamily",
+  "com.apple.iokit.IOReportFamily",
+  "com.apple.iokit.IOSlowAdaptiveClockingFamily",
+  "com.apple.iokit.IOStorageFamily",
+  "com.apple.iokit.IOSurface",
+  "com.apple.kec.Libm",
+  "com.apple.kec.corecrypto",
+  "com.apple.kext.AppleMatch",
+  "com.apple.kext.CoreTrust",
+  "com.apple.security.AppleImage4",
+  "com.apple.security.sandbox",
+  "com.apple.iokit.IOHIDFamily",
+  "com.apple.iokit.IOHIDEventDriver",
+]
+
+# No [firmware]: QEMU runs its own EDK II AArch64 firmware, which has no DarwinBoot. The payload therefore loads
+# DarwinBoot as a driver from Payloads/DarwinBoot.efi; scripts/run-qemu.py builds it and puts it there.
+[payload]
+volume = "QEMUESP"
+size_mib = 192
+loader = "driver"
+title = "QEMU virt: source 4K XNU"
+dram_size = "0x180000000"            # the 6 GiB scripts/run-qemu.py gives the machine
+skip_setup_tool = "scripts/seed-data-skip-setup.py"
+panic_screen = true
+trust_cache_sha256 = [
+  "7416ca4f8377146626bb284e2133c76bee6cb4e3ee0af5d648b186235a7323a7",
+  "8900d6a93d7a59ce1a872a5c081e559f4240a218f97e12d44d22dda46644d68f",
+]
+# The arguments of UniXNU-pipa. sheng-pmgr=2 publishes the original PMGR nub through the bridge;
+# -apfs_shared_datavolume, as on sheng, lets the user-management stack use the one Data volume of qemu_root_defconfig.
+# The offline-* arguments start qemu_root_defconfig's display, with the values of sheng's board.toml: load
+# IOMobileGraphicsFamily, create the display (offline-legacy-register), publish it under /arm-io as the system display
+# (phase 4) on the UEFI frame buffer (gop), at one frame-buffer pixel per point (unit-scale=1), with firmware-powered
+# power management, swap validation, the CPU copy to the frame buffer and retirement of each copied frame. Under
+# qemu_defconfig there is no display, and offline-legacy-register reaches the no-op of package/LinkStubs.c.
+# offline-key-events=1 and sheng-aks=1 start NativeKeyStoreEvents from the same archive, as on sheng: an AppleKeyStore
+# stand-in that answers the state queries (no keybag, no passcode, nothing locked). Without it MKBEventsRegister fails,
+# liveactivitiesd crashes at every start, chronod waits on it and SpringBoard on chronod, so it never takes over the
+# display and the render server ignores every update.
+# offline-hid-input=1, offline-hid-home=1 and sheng-touch-hid=1 start NativeHidInput, as on sheng: a HID device with a
+# keyboard, the Home button and a touch screen, whose fingers package/TouchState.cpp publishes.
+kernel_args = [
+  "-apfs_shared_datavolume",
+  "-v",
+  "serial=3",
+  "debug=0x14e",
+  "kt_fixed_zones=120",
+  "armcpu-diagnostics=1",
+  "sheng-pmgr=2",
+  "-no_slto_panic",
+  "ml-timeout-lock-panic-scale=40",
+  "offline-mobile-graphics-load=1",
+  "offline-legacy-register=1",
+  "offline-legacy-phase=4",
+  "offline-legacy-gop=1",
+  "offline-legacy-unit-scale=1",
+  "offline-legacy-pm=1",
+  "offline-legacy-validate=1",
+  "offline-legacy-transfer=1",
+  "offline-legacy-cpu-present=1",
+  "offline-key-events=1",
+  "sheng-aks=1",
+  "offline-hid-input=1",
+  "offline-hid-home=1",
+  "sheng-touch-hid=1",
+]
+
+[payload.adt]
+tool = "scripts/make-qemu-adt.py"
+chip_id = "207"
+owned_memory_size = "0x100000000"    # 4 GiB, as on pipa
+root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"
+cpu_regs = "0"                       # one CPU
+packed_data_ramdisk = true
+ipad_identity = true
+unique_chip_id = "required"          # .cache/platform-seed holds the one this checkout uses
