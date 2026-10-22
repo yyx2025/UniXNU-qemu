@@ -1,0 +1,19 @@
+# Sources this board adds to the feeds.toml of UniXNU.
+
+# Public Darwin 23 IOStorageFamily: scripts/audit-storage-interface.py builds the block storage ABI of the VirtIO root
+# from it and checks this exact commit.
+[[source]]
+name = "IOStorageFamily"
+kind = "refer"
+git = "https://github.com/apple-oss-distributions/IOStorageFamily.git"
+ref = "IOStorageFamily-315"
+commit = "e45fbe30a7879e0b16e26dddb78538f1b00e0bff"
+
+# Public dyld 1165.3: scripts/audit-target-display-query.py of UniXNU reads the dyld shared cache format from its
+# headers and checks this exact commit, for the user-space observations of the original render server.
+[[source]]
+name = "dyld"
+kind = "refer"
+git = "https://github.com/apple-oss-distributions/dyld.git"
+ref = "dyld-1165.3"
+commit = "a571176e8e00c47e95b95e3156820ebec0cbd5e6"
