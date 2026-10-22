@@ -1,0 +1,31 @@
+# Kernel configuration of the QEMU virt image, kept the same as pipa_defconfig of UniXNU-pipa: the generic CPU,
+# interrupt, timer and platform expert path, the source corecrypto and pthread providers and NativeAES, enough to reach
+# the root mount. CONFIG_XNU_<NAME> becomes XNU_<NAME> for the kernel build. ArmDTPlatform, not ArmVirtPlatform, takes
+# the root, as on the tablets.
+#
+# Left out until their inputs exist: NATIVE_UFS (SM8550 registers), the owner root chain
+# (VERIFIED_ROOT_PROBE, OWNER_*; it needs owner-signed volume policies, see qemu_root_defconfig), BOOT_PROGRESS (it requires that chain),
+# NATIVE_LEGACY_DISPLAY (its archive carries the sheng board probes), NATIVE_RAM_BLOCK (no Data yet) and
+# NATIVE_ADRENO. SHENG_PMGR links the original-PMGR bridge (scripts/build-platform-power.py), without which the
+# original AMFI panics with "No PMGR". XNU's video console draws nothing here despite -v: after the entry probe bars,
+# the panic screen is the only kernel output on the frame buffer.
+
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_AES=y
+CONFIG_XNU_TRUST_CACHE_RUNTIME=y
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+CONFIG_XNU_SHENG_PMGR=y
+# XNU's mockfs as a root on md0 (rd=md0): run-qemu.py --native-user boots UniXNU's static test process from it.
+CONFIG_XNU_SOURCE_MOCKFS=y
+
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+# No-op hooks for probes of the left-out components (scripts/build-link-stubs.py).
+CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/link-stubs/libLinkStubs.a"
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+CONFIG_XNU_ARMVIRT_PLATFORM=n
