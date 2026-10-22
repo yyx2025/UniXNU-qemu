@@ -1,0 +1,47 @@
+# Kernel configuration of the QEMU virt image with the original OS volume as the root and the SystemOS cryptex over
+# it: qemu_defconfig plus NativeVirtioBlock in verified mode and the owner root chain. The OS disk image and the
+# SystemOS image are attached read-only as two VirtIO block devices (run-qemu.py --os-root); the driver picks each
+# disk's owner-signed policy by its size and checks every block it reads. The root that APFS cannot authenticate
+# without Apple's boot manifest is accepted because it is the OS device. Before launchd, the kernel mounts SystemOS
+# read-only as a union over / (OWNER_CACHE_MOUNT, OWNER_UNION_SYSTEMOS), publishes the boot manifest hash of the two
+# policies (OWNER_BOOT_MANIFEST) and tells dyld to use the shared cache from there (OWNER_CACHE_STARTUP), as on sheng.
+# It then mounts the writable Data seed, delivered as the payload's Data ramdisk and published by NativeRamBlock, at
+# /private/var (OWNER_DATA_MOUNT). NATIVE_LEGACY_DISPLAY publishes the UEFI frame buffer (ramfb) as the system display
+# through the original IOMobileFramebufferLegacy and copies each frame into it (the offline-legacy-* arguments of
+# board.toml).
+#
+# The archives are made outside the kernel step, from a kernel built with qemu_defconfig (scripts/build-os-root.py).
+# The Data volume UUID differs per seed, so it is not set here: export XNU_OWNER_DATA_VOLUME_UUID from the seed's
+# report (.cache/firmware/owner-data/seed.json) before "unixnu build kernel".
+
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_AES=y
+CONFIG_XNU_TRUST_CACHE_RUNTIME=y
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+CONFIG_XNU_SHENG_PMGR=y
+CONFIG_XNU_SOURCE_MOCKFS=y
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=y
+CONFIG_XNU_VERIFIED_ROOT_PROBE=y
+CONFIG_XNU_OWNER_ROOT_AUDIT=y
+CONFIG_XNU_OWNER_ROOT_TRUST=y
+CONFIG_XNU_OWNER_CACHE_MOUNT=y
+CONFIG_XNU_OWNER_CACHE_STARTUP=y
+CONFIG_XNU_OWNER_BOOT_MANIFEST=y
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+CONFIG_XNU_NATIVE_RAM_BLOCK=y
+CONFIG_XNU_OWNER_DATA_MOUNT=y
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
+
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a"
+CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a"
+# No-op hooks for probes of the left-out components (scripts/build-link-stubs.py).
+CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/link-stubs/libLinkStubs.a"
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+CONFIG_XNU_ARMVIRT_PLATFORM=n
