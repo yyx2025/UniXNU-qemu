@@ -1,0 +1,158 @@
+name: qemu-bringup
+
+# Boot the QEMU virt board in QEMU on a macOS runner and check the result.
+#
+# Stage 1 (native-user): qemu_defconfig + --native-user. XNU's mockfs serves
+#   UniXNU's static test process as /sbin/launchd on md0, so the run proves the
+#   whole chain below the filesystem: EDK II firmware, DarwinBoot, kernel entry,
+#   MMU, 4 KiB page tables, platform expert, IOKit, AMFI and a real EL0 process.
+#   run-qemu.py prints "native user: PC ... EL0, getpid 1, ... hw.pagesize 4096".
+#
+# The job fails if that line is missing. Nothing here touches a device.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'configs/**'
+      - 'package/**'
+      - 'scripts/**'
+      - 'board.toml'
+      - 'feeds.toml'
+      - '.github/workflows/qemu-bringup.yml'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'How long QEMU runs (native-user stops early on success)'
+        required: false
+        default: '420'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qemu-bringup-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+jobs:
+  native-user:
+    runs-on: macos-15
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout device repository (UniXNU-qemu)
+        uses: actions/checkout@v4
+
+      - name: Checkout UniXNU build system (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          submodules: recursive
+          path: unixnu
+
+      - name: Install build dependencies
+        run: |
+          brew install git make cmake ninja unifdef llvm lld mtools qemu dtc
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          python3 --version
+          qemu-system-aarch64 --version | head -1
+          ls "$(dirname "$(command -v qemu-system-aarch64)")/../share/qemu/edk2-aarch64-code.fd"
+
+      - name: Cache IPSW components
+        uses: actions/cache@v4
+        with:
+          path: out/ipsw
+          key: ipsw-qemu-${{ hashFiles('board.toml') }}
+
+      - name: Configure (defconfig qemu)
+        run: |
+          python3 unixnu/unixnu defconfig qemu_defconfig -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Fetch the Apple reference sources
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
+                          corecrypto-2023 IOStorageFamily \
+                          -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build package and kernel
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build package kernel \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build payload (TCG timebase, empty platform seed until one is recorded)
+        run: |
+          python3 unixnu/unixnu build payload \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --unique-chip-id 0000000000000001
+
+      - name: Upload kernel and payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-kernel-payload
+          path: |
+            out/qemu/kernel/**
+            out/qemu/payload/**
+            out/qemu/logs/**
+          if-no-files-found: warn
+
+      - name: Boot the native-user fixture in QEMU
+        run: |
+          python3 out/qemu/tree/scripts/run-qemu.py \
+            --native-user --accel tcg --seconds "${{ inputs.seconds || 420 }}"
+
+      - name: Check the run
+        run: |
+          python3 - "$GITHUB_WORKSPACE" <<'PY'
+          import json, pathlib, re, sys
+          root = pathlib.Path(sys.argv[1])
+          runs = sorted((root / 'out/qemu/run').glob('*/'), key=lambda p: p.name)
+          if not runs:
+              sys.exit('no run directory was produced')
+          run = runs[-1]
+          print(f'run: {run}')
+          result = run / 'result.json'
+          if result.is_file():
+              data = json.loads(result.read_text())
+              print(json.dumps(data, indent=2))
+              if data.get('native_user_pc'):
+                  print('PASS: native user process reached EL0')
+                  sys.exit(0)
+          log = (run / 'serial.log').read_text(errors='replace')
+          print('--- serial tail ---')
+          print('\n'.join(log.splitlines()[-60:]))
+          if re.search(r'native user:\s*PC\s*[0-9a-fA-F]+', log):
+              print('PASS: native user process reached EL0')
+              sys.exit(0)
+          sys.exit('FAIL: no native user checkpoint in the serial log')
+          PY
+
+      - name: Upload the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-run
+          path: out/qemu/run/
+          if-no-files-found: warn
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-logs
+          path: |
+            out/qemu/logs/
+            out/qemu/run/
+          if-no-files-found: warn
