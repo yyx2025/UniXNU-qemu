@@ -1,0 +1,26 @@
+## SPDX-License-Identifier: BSD-2-Clause-Patent
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = QemuRamfb
+  FILE_GUID      = 0E7D3B6A-9C51-4F2D-8A6E-3D2F5B4C1A90
+  MODULE_TYPE    = UEFI_DRIVER
+  VERSION_STRING = 0.1
+  ENTRY_POINT    = QemuRamfbEntry
+
+[Sources]
+  QemuRamfb.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  IoLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Protocols]
+  gEfiGraphicsOutputProtocolGuid
