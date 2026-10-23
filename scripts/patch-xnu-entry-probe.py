@@ -348,6 +348,15 @@ def padding(data, at, size):
     return len(blob) % 4 == 0 and blob == NOP * (len(blob) // 4)
 
 
+def padding_complaint(data, at, size):
+    """The first words that make padding() false, so a failure names what it found."""
+    blob = bytes(data[at:at + size])
+    words = [blob[i:i + 4].hex() for i in range(0, len(blob) - 3, 4)]
+    odd = [word for word in words if word not in ('00000000', NOP.hex())]
+    shown = ', '.join(odd[:6]) if odd else f'{len(blob)} bytes, not a whole number of words'
+    return f'{shown} (at {at:#x}, {len(blob)} bytes)'
+
+
 def branch(from_va, to_va):
     delta = (to_va - from_va) // 4
     if (to_va - from_va) % 4 or not -(1 << 25) <= delta < (1 << 25):
@@ -393,7 +402,7 @@ def main():
             raise SystemExit(f'{va:#x} holds {word(va):#010x}, expected {value:#010x}: not the kernel these probes are for')
     for va in CAVES.values():
         if not padding(data, file_offset(va), CAVE_SIZE):
-            raise SystemExit(f'Padding at {va:#x} is not empty')
+            raise SystemExit(f'Padding at {va:#x} is not empty: ' + padding_complaint(data, file_offset(va), CAVE_SIZE))
 
     # (site, cave stage, symbols the cave is linked with)
     sites = [(ENTRY_VA, 1, {'target': START_FIRST_CPU}),
@@ -430,7 +439,7 @@ def main():
         if load + len(code) > PANIC_CAVE_END:
             raise SystemExit(f'panic screen is {len(code):#x} bytes at {load:#x}, the padding ends at {PANIC_CAVE_END:#x}')
         if not padding(data, file_offset(load), len(code)):
-            raise SystemExit(f'Padding at {load:#x} is not empty')
+            raise SystemExit(f'Padding at {load:#x} is not empty: ' + padding_complaint(data, file_offset(load), len(code)))
         data[file_offset(load):file_offset(load) + len(code)] = code
         struct.pack_into('<I', data, file_offset(PANIC_VA), branch(PANIC_VA, entry))
         common = kernel_names.get('_panic_trap_to_debugger')
