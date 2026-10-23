@@ -154,3 +154,153 @@ jobs:
             out/qemu/logs/
             out/qemu/run/
           if-no-files-found: warn
+
+  # Stage 2: the original iPadOS userland.
+  #
+  # qemu_root_defconfig adds the verified VirtIO block driver, the owner root chain,
+  # the SystemOS union mount, the Data mount and the frame buffer display. The OS and
+  # SystemOS volumes come from the board's iPad7,1 iPadOS 17.7.11 IPSW (6.4 GiB), and
+  # scripts/build-os-root.py signs and verifies them, records the block storage ABI by
+  # booting the stage-1 kernel once in QEMU, and builds the Data seed.
+  #
+  # Success is /sbin/launchd from the OS volume running and SpringBoard reaching its
+  # main loop: qemu-ps.py reports the process list. The welcome screen is the visible
+  # proof in the screenshots.
+  os-root:
+    runs-on: macos-15
+    timeout-minutes: 300
+    needs: native-user
+
+    steps:
+      - name: Checkout device repository (UniXNU-qemu)
+        uses: actions/checkout@v4
+
+      - name: Checkout UniXNU build system (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          submodules: recursive
+          path: unixnu
+
+      - name: Checkout Mu-Silicium for the panic screen font
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/uefi-vermeer
+          ref: vermeer
+          path: uefi
+          sparse-checkout: |
+            Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib
+
+      - name: Install build dependencies
+        # openssl@3 is what kits/VerifiedRoot/tests/check.py signs with; hdiutil,
+        # diskutil and dtc come with macOS or the earlier steps.
+        run: |
+          brew install git make cmake ninja unifdef llvm lld mtools qemu dtc openssl@3
+
+      - name: Cache the IPSW and its extracted volumes
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/ipsw
+            .cache/firmware
+          key: ipsw-volumes-qemu-${{ hashFiles('board.toml') }}-v1
+
+      - name: Download the board IPSW
+        # extract-target-volume.py opens the zip directly, so it needs the whole file
+        # rather than the range-read members the kernel step uses.
+        run: |
+          mkdir -p ipsw
+          ipsw=ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw
+          if [ ! -s "$ipsw" ]; then
+            curl -fL --retry 3 --retry-delay 5 \
+              "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+              -o "$ipsw"
+          fi
+          ls -l "$ipsw"
+
+      - name: Configure (defconfig qemu)
+        run: |
+          python3 unixnu/unixnu defconfig qemu_defconfig -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Fetch the Apple reference sources
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
+                          corecrypto-2023 IOStorageFamily \
+                          -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build package and kernel (qemu_defconfig, for the storage ABI)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build package kernel \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build payload (qemu_defconfig, TCG)
+        run: |
+          python3 unixnu/unixnu build payload \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
+            --unique-chip-id 0000000000000001
+
+      - name: Build the OS root inputs
+        # scripts/build-os-root.py boots the stage-1 kernel once to record the block
+        # storage ABI, then signs and verifies both volumes. Each step is skipped when
+        # its output already exists, so the cache makes later runs short.
+        env:
+          UNIXNU_UEFI: ${{ github.workspace }}/uefi
+        run: |
+          cd out/qemu/tree
+          python3 scripts/build-os-root.py --ipsw "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+            --openssl-prefix "$(brew --prefix openssl@3)"
+
+      - name: Configure (defconfig qemu_root)
+        run: |
+          volume=$(python3 -c "import json;print(json.load(open('out/qemu/tree/.cache/firmware/owner-data/seed.json'))['volume_uuid'])")
+          printf 'XNU_OWNER_DATA_VOLUME_UUID=%s\n' "$volume" >> "$GITHUB_ENV"
+          python3 unixnu/unixnu defconfig qemu_root_defconfig -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build kernel (qemu_root_defconfig)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 unixnu/unixnu build kernel -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+
+      - name: Build payload (qemu_root_defconfig, TCG)
+        run: |
+          python3 unixnu/unixnu build payload \
+            -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
+            --unique-chip-id 0000000000000001 \
+            --trust-cache out/qemu/tree/build/original-static-system-trust/original-static-system.bundle \
+            --data-ramdisk .cache/firmware/owner-data/owner-data-1g.dbr
+
+      - name: Boot the iPadOS userland in QEMU
+        # TCG needs about five minutes to SpringBoard, so the run is long.
+        run: |
+          set -o pipefail
+          python3 out/qemu/tree/scripts/run-qemu.py --os-root --accel tcg --seconds 2400 \
+            2>&1 | tee run-qemu-os.log
+
+      - name: Check the userland started
+        run: |
+          python3 out/qemu/tree/scripts/check-qemu-run.py \
+            --work out/qemu --stdout run-qemu-os.log \
+            --expect-screen --reject-panic
+
+      - name: Upload the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-os-run
+          path: out/qemu/run/
+          if-no-files-found: warn
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-os-logs
+          path: out/qemu/logs/
+          if-no-files-found: warn
