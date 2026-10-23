@@ -50,7 +50,11 @@ jobs:
       - name: Checkout UniXNU build system (with submodules)
         uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          # Fork, not upstream: vermeer-fix carries -Wno-unknown-warning-option in
+          # scripts/audit-storage-interface.py and the legacy-display guard in
+          # patches/xnu/offline-component-load-probes.patch.
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
           submodules: recursive
           path: unixnu
 
@@ -178,7 +182,11 @@ jobs:
       - name: Checkout UniXNU build system (with submodules)
         uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          # Fork, not upstream: vermeer-fix carries -Wno-unknown-warning-option in
+          # scripts/audit-storage-interface.py and the legacy-display guard in
+          # patches/xnu/offline-component-load-probes.patch.
+          repository: yyx2025/UniXNU
+          ref: vermeer-fix
           submodules: recursive
           path: unixnu
 
