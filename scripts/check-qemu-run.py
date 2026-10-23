@@ -31,34 +31,33 @@ def read_words(text):
 
 
 def parse_native_user(path):
-    """(pc, el, getpid, sysctl_status, pagesize) from native-user.txt, or None."""
+    """(pc, el, getpid, sysctl_status, pagesize) from native-user.txt, or None.
+
+    run-qemu.py writes three HMP answers: "info registers", "x /4gx _results" and
+    "x /1gx _user_page_size". HMP folds a wide read across several lines, so the
+    read is matched on its address instead of on blank-line separated blocks.
+    """
     if not path.is_file():
         return None
     text = path.read_text(errors='replace')
     pc = re.search(r'\bPC=([0-9a-fA-F]+)', text)
     level = re.search(r'\bEL(\d)[th]\b', text)
-    # The file is four lines of "x /Ngx" output: registers, then _results, then
-    # _user_page_size. Split on the blank line that separates the register dump.
-    blocks = [block for block in text.split('\n\n') if block.strip()]
-    results = []
-    pagesize = None
-    for block in blocks:
-        if ':' not in block:
-            continue
-        address = block.split(':', 1)[0].strip()
-        words = read_words(block)
-        if not words:
-            continue
-        # _user_page_size is a single word; _results is the getpid/sysctl pair.
-        if len(words) == 1:
-            pagesize = words[0]
-        elif len(words) >= 2:
-            results = words[:2]
+
+    def read_at(address):
+        """Every 16-hex word printed for the read whose answer starts at address."""
+        match = re.search(rf'^\s*{address}:\s*((?:0x[0-9a-fA-F]{{16}}\s*)+)', text, re.M)
+        if not match:
+            return []
+        return [int(value, 16) for value in re.findall(r'0x([0-9a-fA-F]{16})', match.group(1))]
+
+    results = read_at(r'0*100004000')
+    page = read_at(r'0*100004028')
     return dict(pc=int(pc.group(1), 16) if pc else None,
                 el=int(level.group(1)) if level else None,
                 getpid=results[0] if results else None,
                 sysctl_status=results[1] if len(results) > 1 else None,
-                pagesize=pagesize)
+                pagesize=page[0] if page else None,
+                results_readable=bool(results))
 
 
 def main():
@@ -104,12 +103,18 @@ def main():
         if native is None:
             failures.append('no native-user.txt: run-qemu.py did not reach the --native-user checkpoint')
         else:
-            if native['getpid'] != 1:
-                failures.append(f'getpid returned {native["getpid"]}, not 1')
+            if not native['results_readable']:
+                # The results block is written by the test process itself; an
+                # unreadable one means QEMU stopped before it got that far, or the
+                # user mapping was already torn down.
+                failures.append('the results block at 0x100004000 could not be read, so getpid was never recorded')
+            else:
+                if native['getpid'] != 1:
+                    failures.append(f'getpid returned {native["getpid"]}, not 1')
+                if native['sysctl_status'] not in (0, None):
+                    failures.append(f'sysctl returned {native["sysctl_status"]}, not 0')
             if native['pagesize'] != 0x1000:
                 failures.append(f'hw.pagesize is {native["pagesize"]}, not 4096')
-            if native['sysctl_status'] not in (0, None):
-                failures.append(f'sysctl returned {native["sysctl_status"]}, not 0')
     if args.expect_screen and not screenshots:
         failures.append('no screenshot was taken')
     if args.reject_panic and re.search(r'panic\(|panic: |Debugger called', serial):
