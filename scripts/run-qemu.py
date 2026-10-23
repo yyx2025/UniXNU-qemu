@@ -279,7 +279,14 @@ if args.native_user and process.poll() is None:
         return reply.get('return', json.dumps(reply.get('error')))
 
     registers = hmp('info registers')
+    # The test process stores getpid and the sysctl result at _results, then loops. QEMU's "x" reads through the
+    # current translation, and under TCG the user mapping is not always still in place on the first try, so poll
+    # until the block is readable instead of recording a single "Cannot access memory".
+    deadline = time.time() + 60
     results = hmp(f'x /4gx {addresses["_results"]:#x}')
+    while 'Cannot access memory' in results and time.time() < deadline and process.poll() is None:
+        time.sleep(2)
+        results = hmp(f'x /4gx {addresses["_results"]:#x}')
     page = hmp(f'x /1gx {addresses["_user_page_size"]:#x}')
     (out / 'native-user.txt').write_text(registers + '\n' + results + '\n' + page)
     pc = re.search(r'\bPC=([0-9a-f]+)', registers)
