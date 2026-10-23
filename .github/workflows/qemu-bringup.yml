@@ -54,6 +54,18 @@ jobs:
           submodules: recursive
           path: unixnu
 
+      - name: Checkout Mu-Silicium for the panic screen font
+        # scripts/patch-xnu-entry-probe.py --panic-screen compiles scripts/xnu-panic-screen.c with
+        # -I$UNIXNU_UEFI/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib for Font.h.
+        # The README notes the same requirement for the payload step.
+        uses: actions/checkout@v4
+        with:
+          repository: yyx2025/uefi-vermeer
+          ref: vermeer
+          path: uefi
+          sparse-checkout: |
+            Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib
+
       - name: Install build dependencies
         run: |
           brew install git make cmake ninja unifdef llvm lld mtools qemu dtc
@@ -92,6 +104,8 @@ jobs:
             -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
 
       - name: Build payload (TCG timebase, empty platform seed until one is recorded)
+        env:
+          UNIXNU_UEFI: ${{ github.workspace }}/uefi
         run: |
           python3 unixnu/unixnu build payload \
             -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
