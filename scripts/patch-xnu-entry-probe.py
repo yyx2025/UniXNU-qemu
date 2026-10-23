@@ -341,11 +341,19 @@ def padding(data, at, size):
     __TEXT_EXEC with ARM64 NOPs instead, which are equally unclaimed and equally
     safe to overwrite: they execute as nothing. Both count as empty; anything
     else is real code or data and must not be clobbered.
+
+    size need not be a multiple of four: the panic screen image is a byte count,
+    and the check accepts whole words plus a trailing partial word of the same
+    filling.
     """
     blob = bytes(data[at:at + size])
     if not any(blob):
         return True
-    return len(blob) % 4 == 0 and blob == NOP * (len(blob) // 4)
+    whole = len(blob) - len(blob) % 4
+    if blob[:whole] != NOP * (whole // 4):
+        return False
+    tail = blob[whole:]
+    return not tail or tail == NOP[:len(tail)]
 
 
 def padding_complaint(data, at, size):
