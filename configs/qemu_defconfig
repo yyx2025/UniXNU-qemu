@@ -23,6 +23,10 @@ CONFIG_XNU_NATIVE_PAN=y
 CONFIG_XNU_SHENG_PMGR=y
 # XNU's mockfs as a root on md0 (rd=md0): run-qemu.py --native-user boots UniXNU's static test process from it.
 CONFIG_XNU_SOURCE_MOCKFS=y
+# Opt in to the archive builders of [kernel] archives in board.toml. The unixnu driver returns from build_archives()
+# without this flag, so mockfs, the PMGR bridge and the link stubs are never built and the kernel link fails on
+# mockfs_mountroot / sheng_pmgr_run / native_legacy_display_probe.
+CONFIG_XNU_BUILD_ARCHIVES=y
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 # No-op hooks for probes of the left-out components (scripts/build-link-stubs.py).
