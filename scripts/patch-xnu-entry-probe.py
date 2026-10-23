@@ -330,6 +330,24 @@ def file_offset(va):
     raise SystemExit(f'{va:#x} is not in a file-backed segment of this kernel')
 
 
+NOP = b'\x1f\x20\x03\xd5'
+
+
+def padding(data, at, size):
+    """Is [at, at+size) unclaimed padding?
+
+    A source kernel leaves these holes zeroed, and the retained candidates in
+    UniXNU-sheng do too. A prelinked kernel built here fills the tail of
+    __TEXT_EXEC with ARM64 NOPs instead, which are equally unclaimed and equally
+    safe to overwrite: they execute as nothing. Both count as empty; anything
+    else is real code or data and must not be clobbered.
+    """
+    blob = bytes(data[at:at + size])
+    if not any(blob):
+        return True
+    return len(blob) % 4 == 0 and blob == NOP * (len(blob) // 4)
+
+
 def branch(from_va, to_va):
     delta = (to_va - from_va) // 4
     if (to_va - from_va) % 4 or not -(1 << 25) <= delta < (1 << 25):
@@ -374,7 +392,7 @@ def main():
         if word(va) != value:
             raise SystemExit(f'{va:#x} holds {word(va):#010x}, expected {value:#010x}: not the kernel these probes are for')
     for va in CAVES.values():
-        if any(data[file_offset(va):file_offset(va) + CAVE_SIZE]):
+        if not padding(data, file_offset(va), CAVE_SIZE):
             raise SystemExit(f'Padding at {va:#x} is not empty')
 
     # (site, cave stage, symbols the cave is linked with)
@@ -403,14 +421,15 @@ def main():
     if args.panic_screen:
         # Right after the last probe cave in use, so the padding is shared as tightly as possible.
         PANIC_CAVE = max(CAVES[stage] for _, stage, _ in sites) + CAVE_SIZE
-        if word(PANIC_VA) in (0, 0xFFFFFFFF) or any(data[file_offset(PANIC_CAVE):file_offset(PANIC_CAVE_END)]):
+        if word(PANIC_VA) in (0, 0xFFFFFFFF) or not padding(data, file_offset(PANIC_CAVE),
+                                                             file_offset(PANIC_CAVE_END) - file_offset(PANIC_CAVE)):
             raise SystemExit('panic() or the panic screen padding is not as expected')
         with tempfile.TemporaryDirectory() as tmp:
             code, load, entry = assemble_c(ROOT / 'scripts/xnu-panic-screen.c', PANIC_CAVE, Path(tmp), kernel_names)
             common_entry = panic_common_entry(Path(tmp), code, load)
         if load + len(code) > PANIC_CAVE_END:
             raise SystemExit(f'panic screen is {len(code):#x} bytes at {load:#x}, the padding ends at {PANIC_CAVE_END:#x}')
-        if any(data[file_offset(load):file_offset(load) + len(code)]):
+        if not padding(data, file_offset(load), len(code)):
             raise SystemExit(f'Padding at {load:#x} is not empty')
         data[file_offset(load):file_offset(load) + len(code)] = code
         struct.pack_into('<I', data, file_offset(PANIC_VA), branch(PANIC_VA, entry))
