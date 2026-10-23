@@ -252,15 +252,22 @@ jobs:
             --uefi "$GITHUB_WORKSPACE/uefi" \
             --unique-chip-id 0000000000000001
 
+      - name: Extract the OS trust cache member
+        # build-original-system-trust.py reads the OS volume's companion trust cache from
+        # out/ipsw/<build>/. That file is a zip member (Firmware/<dmg>.trustcache) and not a
+        # manifest component, so "unixnu ipsw fetch" never extracts it.
+        run: |
+          python3 scripts/extract-ipsw-member.py \
+            "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+            044-76040-038.dmg.trustcache "$GITHUB_WORKSPACE/out/ipsw/21H461"
+
       - name: Build the OS root inputs
-        # scripts/build-os-root.py boots the stage-1 kernel once to record the block
-        # storage ABI, then signs and verifies both volumes. Each step is skipped when
-        # its output already exists, so the cache makes later runs short.
         env:
           UNIXNU_UEFI: ${{ github.workspace }}/uefi
         run: |
           cd out/qemu/tree
-          python3 scripts/build-os-root.py --ipsw "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
+          python3 scripts/build-os-root.py \
+            --ipsw "$GITHUB_WORKSPACE/ipsw/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw" \
             --openssl-prefix "$(brew --prefix openssl@3)"
 
       - name: Configure (defconfig qemu_root)
