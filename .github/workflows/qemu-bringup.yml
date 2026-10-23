@@ -104,11 +104,14 @@ jobs:
             -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
 
       - name: Build payload (TCG timebase, empty platform seed until one is recorded)
-        env:
-          UNIXNU_UEFI: ${{ github.workspace }}/uefi
+        # --uefi is required here, not just the UNIXNU_UEFI environment variable: unixnu's payload step passes
+        # UNIXNU_UEFI=str(ctx.uefi or '') to the probe patcher, and ctx.uefi is only set from --uefi. An empty
+        # value makes patch-xnu-entry-probe.py fall back to its <tree>/uefi-sheng default, which is not in the
+        # workspace, so the panic screen cannot find Font.h.
         run: |
           python3 unixnu/unixnu build payload \
             -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" \
+            --uefi "$GITHUB_WORKSPACE/uefi" \
             --unique-chip-id 0000000000000001
 
       - name: Upload kernel and payload
