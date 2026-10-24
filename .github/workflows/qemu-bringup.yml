@@ -280,7 +280,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 unixnu/unixnu build kernel -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out"
+          set -o pipefail
+          python3 unixnu/unixnu build kernel -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" 2>&1 | tee root-kernel.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # The job-log and artifact endpoints are not always readable from here, so surface the
+            # failure in the step summary and as an annotation.
+            {
+              echo '### qemu_root_defconfig kernel build failed'
+              echo '```'
+              tail -n 60 root-kernel.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::kernel build failed; last lines:"
+            tail -n 20 root-kernel.log
+            exit "$status"
+          fi
 
       - name: Build payload (qemu_root_defconfig, TCG)
         run: |
