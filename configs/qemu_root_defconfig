@@ -37,6 +37,11 @@ CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
 CONFIG_XNU_NATIVE_RAM_BLOCK=y
 CONFIG_XNU_OWNER_DATA_MOUNT=y
 CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
+# Opt in to the archive builders of [kernel] archives in board.toml. The unixnu driver returns from
+# build_archives() without this flag, so the mockfs fixture, the PMGR bridge and the link stubs are not
+# built, and the prebuilt archives this configuration links (VirtIO, RAM block, verified root) have no
+# supporting objects. qemu_defconfig sets it for the same reason.
+CONFIG_XNU_BUILD_ARCHIVES=y
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a"
