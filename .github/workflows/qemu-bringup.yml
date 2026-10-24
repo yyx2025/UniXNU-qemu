@@ -284,16 +284,13 @@ jobs:
           python3 unixnu/unixnu build kernel -D "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/out" 2>&1 | tee root-kernel.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            {
-              echo '### qemu_root_defconfig kernel build failed'
-              echo ''
-              echo '```'
-              tail -n 80 root-kernel.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            # Annotations are the one channel GitHub exposes without an artifacts download.
-            grep -E 'error:|Undefined symbols|ld: |failed' root-kernel.log | tail -n 25 | while IFS= read -r line; do
-              echo "::error::${line}"
+            # Surface the failure without an artifacts download: annotations are readable from the API.
+            printf '%s\n' '::group::qemu_root_defconfig kernel build tail'
+            tail -n 120 root-kernel.log
+            printf '%s\n' '::endgroup::'
+            # Every line of the tail becomes an annotation, so the message survives in check-runs.
+            tail -n 20 root-kernel.log | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::kernel: ${line}"
             done
             exit "$status"
           fi
